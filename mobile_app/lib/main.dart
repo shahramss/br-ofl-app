@@ -1,11 +1,14 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,6 +21,10 @@ const Color kBg = Color(0xFFFAFAFA);
 const Color kText = Color(0xFF1F2937);
 const Color kMuted = Color(0xFF6B7280);
 const Color kLine = Color(0xFFE5E7EB);
+const String kAppName = 'مدیریت هوشمند';
+const String kAppVersion = '1.1.0';
+const String kFooterText = 'طراحی شده در وب تیما  طراح شهرام سعیدنیا';
+const String kWebTeamaUrl = 'https://webteama.com';
 
 class ProductSpecsApp extends StatelessWidget {
   const ProductSpecsApp({super.key});
@@ -28,7 +35,7 @@ class ProductSpecsApp extends StatelessWidget {
       textDirection: TextDirection.rtl,
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'اپ مشخصات محصول',
+        title: 'مدیریت هوشمند',
         theme: ThemeData(
           useMaterial3: true,
           colorScheme: ColorScheme.fromSeed(seedColor: kOrange),
@@ -56,9 +63,50 @@ class ProductSpecsApp extends StatelessWidget {
             ),
           ),
         ),
-        home: const MainShell(),
+        home: const AuthGate(),
       ),
     );
+  }
+}
+
+
+class AuthGate extends StatefulWidget {
+  const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  bool _loading = true;
+  bool _loggedIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    // برای امنیت، بعد از هر بار باز شدن اپ، صفحه ورود نمایش داده می‌شود.
+    // نام کاربری ذخیره می‌شود، اما رمز ذخیره نمی‌شود؛ ورود سریع با اثر انگشت انجام می‌شود.
+    if (mounted) {
+      setState(() {
+        _loggedIn = false;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (!_loggedIn) {
+      return LoginScreen(onLoggedIn: () => setState(() => _loggedIn = true));
+    }
+    return const MainShell();
   }
 }
 
@@ -156,22 +204,14 @@ class AppHeader extends StatelessWidget {
                 else
                   const SizedBox(width: 48),
                 const Spacer(),
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: kOrange.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(Icons.lock_outline_rounded, color: kOrange),
-                ),
+                const BrandBadge(size: 44),
                 const SizedBox(width: 10),
                 const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('اپ مشخصات محصول', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                    Text(kAppName, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
                     SizedBox(height: 2),
-                    Text('ثبت مشخصات محصولات', style: TextStyle(color: kMuted, fontSize: 13)),
+                    Text('ثبت هوشمند مشخصات محصولات', style: TextStyle(color: kMuted, fontSize: 13)),
                   ],
                 ),
                 const Spacer(),
@@ -198,6 +238,31 @@ class AppHeader extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+class BrandBadge extends StatelessWidget {
+  final double size;
+  const BrandBadge({super.key, this.size = 56});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Color(0xFFFF9A3D), kOrangeDark]),
+        borderRadius: BorderRadius.circular(size * 0.28),
+        boxShadow: [BoxShadow(color: kOrange.withOpacity(0.22), blurRadius: 16, offset: const Offset(0, 8))],
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        'B.AI',
+        textDirection: TextDirection.ltr,
+        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: size * 0.26, letterSpacing: -0.4),
       ),
     );
   }
@@ -355,6 +420,92 @@ String normalizeSite(String value) {
   return url;
 }
 
+
+class LoginResult {
+  final int id;
+  final String username;
+  final String displayName;
+  final List<String> roles;
+
+  LoginResult({required this.id, required this.username, required this.displayName, required this.roles});
+
+  factory LoginResult.fromJson(Map<String, dynamic> json) {
+    final rawRoles = json['roles'];
+    return LoginResult(
+      id: _toInt(json['id']),
+      username: '${json['username'] ?? ''}',
+      displayName: '${json['display_name'] ?? json['username'] ?? ''}',
+      roles: rawRoles is List ? rawRoles.map((e) => '$e').toList() : <String>[],
+    );
+  }
+}
+
+class AuthSessionStore {
+  static const _storage = FlutterSecureStorage();
+  static const _savedUsernameKey = 'savedWpUsername';
+  static const _loggedInKey = 'authLoggedIn';
+  static const _displayNameKey = 'authDisplayName';
+  static const _rolesKey = 'authRoles';
+
+  Future<bool> isLoggedIn() async => (await _storage.read(key: _loggedInKey)) == '1';
+  Future<String> savedUsername() async => await _storage.read(key: _savedUsernameKey) ?? '';
+  Future<String> displayName() async => await _storage.read(key: _displayNameKey) ?? '';
+
+  Future<void> saveLogin(LoginResult result) async {
+    await _storage.write(key: _loggedInKey, value: '1');
+    await _storage.write(key: _savedUsernameKey, value: result.username.trim());
+    await _storage.write(key: _displayNameKey, value: result.displayName.trim());
+    await _storage.write(key: _rolesKey, value: result.roles.join(','));
+  }
+
+  Future<void> logout() async {
+    await _storage.write(key: _loggedInKey, value: '0');
+  }
+}
+
+class LoginAttemptStore {
+  static const _countKey = 'loginFailCount';
+  static const _lockUntilKey = 'loginLockUntil';
+
+  Future<DateTime?> lockUntil() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_lockUntilKey) ?? '';
+    if (raw.isEmpty) return null;
+    return DateTime.tryParse(raw);
+  }
+
+  Future<bool> isLocked() async {
+    final until = await lockUntil();
+    if (until == null) return false;
+    if (DateTime.now().isBefore(until)) return true;
+    await reset();
+    return false;
+  }
+
+  Future<int> failedCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_countKey) ?? 0;
+  }
+
+  Future<DateTime?> registerFailure() async {
+    final prefs = await SharedPreferences.getInstance();
+    final next = (prefs.getInt(_countKey) ?? 0) + 1;
+    await prefs.setInt(_countKey, next);
+    if (next >= 5) {
+      final until = DateTime.now().add(const Duration(minutes: 10));
+      await prefs.setString(_lockUntilKey, until.toIso8601String());
+      return until;
+    }
+    return null;
+  }
+
+  Future<void> reset() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_countKey);
+    await prefs.remove(_lockUntilKey);
+  }
+}
+
 class ApiException implements Exception {
   final String message;
   ApiException(this.message);
@@ -418,7 +569,9 @@ class SpecItem {
 class AiExtractResult {
   final List<SpecItem> specs;
   final String content;
-  const AiExtractResult({required this.specs, required this.content});
+  final String seoTitle;
+  final String seoDescription;
+  const AiExtractResult({required this.specs, required this.content, required this.seoTitle, required this.seoDescription});
 }
 
 class ProductDetails {
@@ -506,6 +659,14 @@ class WordPressApi {
     return fallback;
   }
 
+  Future<LoginResult> login({required String username, required String password}) async {
+    final data = await _postJson(_uri('/login'), {
+      'username': username.trim(),
+      'password': password,
+    });
+    return LoginResult.fromJson(Map<String, dynamic>.from(data['user'] ?? data));
+  }
+
   Future<String> ping() async {
     final data = await _getJson(_uri('/ping'));
     return '${data['message'] ?? 'اتصال موفق است'}';
@@ -536,7 +697,7 @@ class WordPressApi {
     return ProductDetails.fromJson(data);
   }
 
-  Future<String> saveSpecs({required int productId, required String mode, required List<SpecItem> specs, required String rawText, required String provider, required String productContent}) async {
+  Future<String> saveSpecs({required int productId, required String mode, required List<SpecItem> specs, required String rawText, required String provider, required String productContent, required String seoTitle, required String seoDescription}) async {
     final clean = specs.where((e) => e.name.trim().isNotEmpty && e.value.trim().isNotEmpty).map((e) => e.toJson()).toList();
     final data = await _postJson(_uri('/products/$productId/specs'), {
       'mode': mode,
@@ -544,6 +705,8 @@ class WordPressApi {
       'raw_text': rawText,
       'ai_provider': provider,
       'product_content': productContent,
+      'seo_title': seoTitle,
+      'seo_description': seoDescription,
     });
     return '${data['message'] ?? 'مشخصات ذخیره شد'}';
   }
@@ -580,12 +743,14 @@ $rawText
 ۲. اگر کاربر هر مشخصه دیگری هم گفت، حتی اگر در لیست‌های معمول دسته‌بندی نبود، آن را هم به مشخصات اضافه کن.
 ۳. هیچ مقدار حدسی، تبلیغاتی یا ساختگی نساز.
 ۴. اگر چیزی گفته نشده، آن فیلد را برنگردان.
-۵. بر اساس نام محصول و مشخصات استخراج‌شده، یک پاراگراف کوتاه و طبیعی برای توضیح محصول بساز.
-۶. پاراگراف فقط بر اساس اطلاعات موجود باشد و ویژگی ساختگی اضافه نکند.
+۵. بر اساس نام محصول و مشخصات استخراج‌شده، یک پاراگراف توضیح محصول بساز؛ متن کمی کامل‌تر باشد، حدود ۷۰ تا ۱۱۰ کلمه فارسی، اما فقط یک پاراگراف باشد.
+۶. پاراگراف فقط بر اساس اطلاعات موجود باشد و ویژگی ساختگی، ادعای دروغ، گزافه‌گویی، تبلیغات اغراق‌آمیز، بهترین/ارزان‌ترین/تضمینی بودن یا مقایسه بی‌دلیل اضافه نکند.
 ۷. آخر پاراگراف دقیقاً این جمله را اضافه کن: این محصول با ارسال فوری از بازار قفل سفارش بدید
+۸. یک عنوان سئو یکتا بساز که بر اساس نام محصول و مشخصات مهم باشد. عنوان سئو حداکثر ۱۰ کلمه و حداکثر ۶۰ کاراکتر باشد.
+۹. یک توضیح متا یکتا بساز که بر اساس نام و مشخصات باشد. توضیح متا حداکثر ۲۵ کلمه و حداکثر ۱۵۵ کاراکتر باشد و اغراق یا ادعای ساختگی نداشته باشد.
 خروجی فقط JSON معتبر باشد، بدون توضیح اضافه.
 فرمت دقیق:
-{"specs":[{"name":"قطر","value":"۱۰ میلی‌متر"},{"name":"جنس","value":"فولاد"}],"content":"این محصول با قطر ۱۰ میلی‌متر و جنس فولاد برای کاربردهای فنی مناسب است. این محصول با ارسال فوری از بازار قفل سفارش بدید"}
+{"specs":[{"name":"قطر","value":"۱۰ میلی‌متر"},{"name":"جنس","value":"فولاد"}],"content":"این محصول با قطر ۱۰ میلی‌متر و جنس فولاد برای استفاده‌های فنی مرتبط با مشخصات اعلام‌شده مناسب است و انتخاب آن برای کاربرانی که به دنبال ثبت دقیق مشخصات محصول هستند، می‌تواند کمک‌کننده باشد. این محصول با ارسال فوری از بازار قفل سفارش بدید","seo_title":"سنبه قطر ۱۰ میلی‌متر فولادی","seo_description":"مشخصات سنبه قطر ۱۰ میلی‌متر با جنس فولاد و توضیحات فنی محصول را بررسی کنید."}
 ''';
 
     final body = {
@@ -593,7 +758,7 @@ $rawText
       'messages': [
         {
           'role': 'system',
-          'content': 'تو یک دستیار استخراج مشخصات فنی و تولید توضیح کوتاه محصول برای فروشگاه هستی. خروجی فقط JSON معتبر بده.'
+          'content': 'تو یک دستیار استخراج مشخصات فنی، تولید توضیح محصول و ساخت عنوان و توضیح متای سئو هستی. خروجی فقط JSON معتبر بده.'
         },
         {'role': 'user', 'content': prompt}
       ],
@@ -639,7 +804,11 @@ $rawText
       if (productContent.isEmpty && specs.isNotEmpty) {
         productContent = _buildFallbackContent(productName, specs);
       }
-      return AiExtractResult(specs: specs, content: productContent);
+      var seoTitle = '${parsed['seo_title'] ?? ''}'.trim();
+      var seoDescription = '${parsed['seo_description'] ?? ''}'.trim();
+      if (seoTitle.isEmpty) seoTitle = _buildFallbackSeoTitle(productName, specs);
+      if (seoDescription.isEmpty) seoDescription = _buildFallbackSeoDescription(productName, specs);
+      return AiExtractResult(specs: specs, content: _limitChars(productContent, 900), seoTitle: _limitWords(_limitChars(seoTitle, 60), 10), seoDescription: _limitWords(_limitChars(seoDescription, 155), 25));
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('تحلیل با هوش مصنوعی انجام نشد. کلید API، مدل و اینترنت گوشی را بررسی کنید. جزئیات: $e');
@@ -656,6 +825,31 @@ $rawText
         ? '$name یک محصول کاربردی برای استفاده‌های فنی و فروشگاهی است.'
         : '$name با مشخصاتی مانند $parts برای استفاده‌های فنی و فروشگاهی مناسب است.';
     return '$base این محصول با ارسال فوری از بازار قفل سفارش بدید';
+  }
+
+  String _buildFallbackSeoTitle(String productName, List<SpecItem> specs) {
+    final main = specs.take(2).map((e) => '${e.name} ${e.value}').join(' ');
+    final text = main.trim().isEmpty ? productName.trim() : '${productName.trim()} $main';
+    return _limitWords(_limitChars(text.trim(), 60), 10);
+  }
+
+  String _buildFallbackSeoDescription(String productName, List<SpecItem> specs) {
+    final parts = specs.take(4).map((e) => '${e.name} ${e.value}').join('، ');
+    final name = productName.trim().isEmpty ? 'محصول' : productName.trim();
+    final text = parts.isEmpty ? 'بررسی مشخصات فنی $name و اطلاعات کاربردی محصول.' : 'بررسی مشخصات فنی $name شامل $parts و اطلاعات کاربردی محصول.';
+    return _limitWords(_limitChars(text, 155), 25);
+  }
+
+  String _limitChars(String input, int max) {
+    final text = input.trim();
+    if (text.length <= max) return text;
+    return text.substring(0, max).trim();
+  }
+
+  String _limitWords(String input, int maxWords) {
+    final words = input.trim().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
+    if (words.length <= maxWords) return input.trim();
+    return words.take(maxWords).join(' ');
   }
 
   String _safeError(String body) {
@@ -736,6 +930,223 @@ class HistoryStore {
   }
 }
 
+
+class LoginScreen extends StatefulWidget {
+  final VoidCallback onLoggedIn;
+  const LoginScreen({super.key, required this.onLoggedIn});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _settingsStore = SettingsStore();
+  final _authStore = AuthSessionStore();
+  final _attemptStore = LoginAttemptStore();
+  final _localAuth = LocalAuthentication();
+
+  final _site = TextEditingController();
+  final _token = TextEditingController();
+  final _username = TextEditingController();
+  final _password = TextEditingController();
+  final _captcha = TextEditingController();
+
+  final _rand = Random();
+  int _a = 1;
+  int _b = 1;
+  bool _loading = true;
+  bool _loggingIn = false;
+  bool _biometricReady = false;
+  DateTime? _lockUntil;
+
+  @override
+  void initState() {
+    super.initState();
+    _newCaptcha();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final s = await _settingsStore.load();
+    _site.text = s.siteUrl;
+    _token.text = s.wpToken;
+    _username.text = await _authStore.savedUsername();
+    _lockUntil = await _attemptStore.lockUntil();
+    final hasSavedUser = _username.text.trim().isNotEmpty && await _authStore.isLoggedIn();
+    var canBio = false;
+    try {
+      canBio = hasSavedUser && (await _localAuth.canCheckBiometrics || await _localAuth.isDeviceSupported());
+    } catch (_) {
+      canBio = false;
+    }
+    if (mounted) {
+      setState(() {
+        _biometricReady = canBio;
+        _loading = false;
+      });
+    }
+  }
+
+  void _newCaptcha() {
+    _a = _rand.nextInt(8) + 1;
+    _b = _rand.nextInt(8) + 1;
+    _captcha.clear();
+  }
+
+  Future<void> _login() async {
+    if (await _attemptStore.isLocked()) {
+      final until = await _attemptStore.lockUntil();
+      setState(() => _lockUntil = until);
+      _toast('به دلیل ورود اشتباه، تا ${_timeText(until)} امکان ورود ندارید.', error: true);
+      return;
+    }
+    if (_site.text.trim().isEmpty || _token.text.trim().isEmpty) {
+      _toast('آدرس سایت و توکن اتصال وردپرس را وارد کنید.', error: true);
+      return;
+    }
+    if (_username.text.trim().isEmpty || _password.text.isEmpty) {
+      _toast('نام کاربری و رمز وردپرس را وارد کنید.', error: true);
+      return;
+    }
+    if (int.tryParse(_captcha.text.trim()) != _a + _b) {
+      await _fail('کد امنیتی عددی اشتباه است.');
+      _newCaptcha();
+      setState(() {});
+      return;
+    }
+
+    setState(() => _loggingIn = true);
+    try {
+      final old = await _settingsStore.load();
+      final settings = old.copyWith(siteUrl: normalizeSite(_site.text), wpToken: _token.text);
+      await _settingsStore.save(settings);
+      final result = await WordPressApi(settings).login(username: _username.text, password: _password.text);
+      await _attemptStore.reset();
+      await _authStore.saveLogin(result);
+      _password.clear();
+      widget.onLoggedIn();
+    } catch (e) {
+      await _fail('$e');
+      _newCaptcha();
+    } finally {
+      if (mounted) setState(() => _loggingIn = false);
+    }
+  }
+
+  Future<void> _fail(String message) async {
+    final until = await _attemptStore.registerFailure();
+    setState(() => _lockUntil = until);
+    if (until != null) {
+      _toast('۵ بار ورود اشتباه ثبت شد. ۱۰ دقیقه بعد دوباره تلاش کنید.', error: true);
+    } else {
+      final left = 5 - await _attemptStore.failedCount();
+      _toast('$message ${left > 0 ? 'تلاش باقی‌مانده: $left' : ''}', error: true);
+    }
+  }
+
+  Future<void> _biometricLogin() async {
+    try {
+      final ok = await _localAuth.authenticate(
+        localizedReason: 'برای ورود به مدیریت هوشمند اثر انگشت یا قفل گوشی را تأیید کنید.',
+        options: const AuthenticationOptions(biometricOnly: false, stickyAuth: true),
+      );
+      if (ok) widget.onLoggedIn();
+    } catch (e) {
+      _toast('ورود با اثر انگشت انجام نشد: $e', error: true);
+    }
+  }
+
+  String _timeText(DateTime? dt) {
+    if (dt == null) return '';
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+
+  Future<void> _openWebTeama() async {
+    final uri = Uri.parse(kWebTeamaUrl);
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  void _toast(String msg, {bool error = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, textDirection: TextDirection.rtl),
+      backgroundColor: error ? Colors.red.shade700 : Colors.green.shade700,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    final locked = _lockUntil != null && DateTime.now().isBefore(_lockUntil!);
+    return Scaffold(
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
+          children: [
+            const SizedBox(height: 14),
+            const Center(child: BrandBadge(size: 78)),
+            const SizedBox(height: 14),
+            const Text(kAppName, textAlign: TextAlign.center, style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: kText)),
+            const SizedBox(height: 6),
+            const Text('ورود مدیر فروشگاه یا مدیر سایت', textAlign: TextAlign.center, style: TextStyle(color: kMuted, fontSize: 15)),
+            const SizedBox(height: 24),
+            AppCard(
+              child: Column(
+                children: [
+                  TextField(controller: _site, textDirection: TextDirection.ltr, decoration: const InputDecoration(labelText: 'آدرس سایت وردپرس', hintText: 'https://example.com', prefixIcon: Icon(Icons.public_rounded))),
+                  const SizedBox(height: 12),
+                  TextField(controller: _token, obscureText: true, textDirection: TextDirection.ltr, decoration: const InputDecoration(labelText: 'توکن اتصال افزونه', prefixIcon: Icon(Icons.vpn_key_rounded))),
+                  const Divider(height: 30),
+                  TextField(controller: _username, textDirection: TextDirection.ltr, decoration: const InputDecoration(labelText: 'نام کاربری وردپرس', prefixIcon: Icon(Icons.person_rounded))),
+                  const SizedBox(height: 12),
+                  TextField(controller: _password, obscureText: true, textDirection: TextDirection.ltr, decoration: const InputDecoration(labelText: 'رمز عبور وردپرس', prefixIcon: Icon(Icons.lock_rounded))),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+                        decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFFED7AA))),
+                        child: Text('$_a + $_b = ؟', textDirection: TextDirection.ltr, style: const TextStyle(fontWeight: FontWeight.w900, color: kOrangeDark)),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(child: TextField(controller: _captcha, keyboardType: TextInputType.number, textDirection: TextDirection.ltr, decoration: const InputDecoration(labelText: 'کپچا عددی'))),
+                      IconButton(onPressed: () => setState(_newCaptcha), icon: const Icon(Icons.refresh_rounded)),
+                    ],
+                  ),
+                  if (locked) ...[
+                    const SizedBox(height: 12),
+                    ErrorBox(message: 'حساب اپلیکیشن تا ${_timeText(_lockUntil)} قفل است. ۱۰ دقیقه بعد دوباره تلاش کنید.'),
+                  ],
+                  const SizedBox(height: 16),
+                  AppButton(text: 'ورود', icon: Icons.login_rounded, loading: _loggingIn, onPressed: locked ? null : _login),
+                  if (_biometricReady) ...[
+                    const SizedBox(height: 10),
+                    AppButton(text: 'ورود با اثر انگشت', icon: Icons.fingerprint_rounded, outlined: true, onPressed: _biometricLogin),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            Center(
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                children: [
+                  const Text('طراحی شده در ', style: TextStyle(color: kMuted)),
+                  InkWell(onTap: _openWebTeama, child: const Text('وب تیما', style: TextStyle(color: kOrangeDark, fontWeight: FontWeight.w900, decoration: TextDecoration.underline))),
+                  const Text('  طراح شهرام سعیدنیا', style: TextStyle(color: kMuted)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text('نسخه نرم افزار $kAppVersion', textAlign: TextAlign.center, style: TextStyle(color: kMuted, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -755,6 +1166,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loading = true;
   bool _saving = false;
   bool _testing = false;
+  AppSettings _loadedSettings = const AppSettings();
+  bool _openaiSaved = false;
+  bool _deepseekSaved = false;
+  bool _editOpenai = true;
+  bool _editDeepseek = true;
 
   @override
   void initState() {
@@ -764,23 +1180,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final s = await _store.load();
+    _loadedSettings = s;
     _site.text = s.siteUrl;
     _token.text = s.wpToken;
-    _openai.text = s.openaiKey;
-    _deepseek.text = s.deepseekKey;
+    _openai.clear();
+    _deepseek.clear();
     _openaiModel.text = s.openaiModel;
     _deepseekModel.text = s.deepseekModel;
     _provider = s.aiProvider;
+    _openaiSaved = s.openaiKey.trim().isNotEmpty;
+    _deepseekSaved = s.deepseekKey.trim().isNotEmpty;
+    _editOpenai = !_openaiSaved;
+    _editDeepseek = !_deepseekSaved;
     setState(() => _loading = false);
   }
 
   AppSettings _collect() {
+    final keepOpenai = _openaiSaved && !_editOpenai;
+    final keepDeepseek = _deepseekSaved && !_editDeepseek;
     return AppSettings(
       siteUrl: normalizeSite(_site.text),
       wpToken: _token.text,
       aiProvider: _provider,
-      openaiKey: _openai.text,
-      deepseekKey: _deepseek.text,
+      openaiKey: keepOpenai ? _loadedSettings.openaiKey : _openai.text,
+      deepseekKey: keepDeepseek ? _loadedSettings.deepseekKey : _deepseek.text,
       openaiModel: _openaiModel.text.isEmpty ? 'gpt-4o-mini' : _openaiModel.text,
       deepseekModel: _deepseekModel.text.isEmpty ? 'deepseek-chat' : _deepseekModel.text,
     );
@@ -788,8 +1211,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
-    await _store.save(_collect());
-    setState(() => _saving = false);
+    final next = _collect();
+    await _store.save(next);
+    setState(() {
+      _loadedSettings = next;
+      _openaiSaved = next.openaiKey.trim().isNotEmpty;
+      _deepseekSaved = next.deepseekKey.trim().isNotEmpty;
+      _editOpenai = !_openaiSaved;
+      _editDeepseek = !_deepseekSaved;
+      _openai.clear();
+      _deepseek.clear();
+      _saving = false;
+    });
     if (mounted) _toast('تنظیمات ذخیره شد');
   }
 
@@ -812,6 +1245,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
       content: Text(msg, textDirection: TextDirection.rtl),
       backgroundColor: error ? Colors.red.shade700 : Colors.green.shade700,
     ));
+  }
+
+  Widget _apiKeyField({required String label, required bool saved, required bool editing, required TextEditingController controller, required VoidCallback onReplace}) {
+    if (saved && !editing) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: const Color(0xFFF9FAFB), border: Border.all(color: kLine), borderRadius: BorderRadius.circular(16)),
+        child: Row(
+          children: [
+            const Icon(Icons.verified_user_rounded, color: Colors.green),
+            const SizedBox(width: 8),
+            Expanded(child: Text('$label ذخیره شده است و قابل مشاهده یا کپی نیست.', style: const TextStyle(color: kMuted))),
+            TextButton(onPressed: onReplace, child: const Text('پاک کردن و ثبت جدید')),
+          ],
+        ),
+      );
+    }
+    return TextField(
+      controller: controller,
+      obscureText: true,
+      enableInteractiveSelection: false,
+      autocorrect: false,
+      textDirection: TextDirection.ltr,
+      decoration: InputDecoration(labelText: label, hintText: 'کلید را وارد کنید؛ بعد از ذخیره دیگر دیده نمی‌شود', prefixIcon: const Icon(Icons.lock_rounded)),
+    );
   }
 
   @override
@@ -865,11 +1324,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onChanged: (v) => setState(() => _provider = v ?? 'openai'),
                     ),
                     const SizedBox(height: 14),
-                    TextField(controller: _openai, obscureText: true, textDirection: TextDirection.ltr, decoration: const InputDecoration(labelText: 'OpenAI API Key', hintText: 'sk-...', prefixIcon: Icon(Icons.lock_rounded))),
+                    _apiKeyField(
+                      label: 'OpenAI API Key',
+                      saved: _openaiSaved,
+                      editing: _editOpenai,
+                      controller: _openai,
+                      onReplace: () => setState(() {
+                        _editOpenai = true;
+                        _openaiSaved = false;
+                        _openai.clear();
+                        _loadedSettings = _loadedSettings.copyWith(openaiKey: '');
+                      }),
+                    ),
                     const SizedBox(height: 14),
                     TextField(controller: _openaiModel, textDirection: TextDirection.ltr, decoration: const InputDecoration(labelText: 'مدل OpenAI', hintText: 'gpt-4o-mini')),
                     const SizedBox(height: 14),
-                    TextField(controller: _deepseek, obscureText: true, textDirection: TextDirection.ltr, decoration: const InputDecoration(labelText: 'DeepSeek API Key', prefixIcon: Icon(Icons.lock_rounded))),
+                    _apiKeyField(
+                      label: 'DeepSeek API Key',
+                      saved: _deepseekSaved,
+                      editing: _editDeepseek,
+                      controller: _deepseek,
+                      onReplace: () => setState(() {
+                        _editDeepseek = true;
+                        _deepseekSaved = false;
+                        _deepseek.clear();
+                        _loadedSettings = _loadedSettings.copyWith(deepseekKey: '');
+                      }),
+                    ),
                     const SizedBox(height: 14),
                     TextField(controller: _deepseekModel, textDirection: TextDirection.ltr, decoration: const InputDecoration(labelText: 'مدل DeepSeek', hintText: 'deepseek-chat')),
                   ],
@@ -1164,6 +1645,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   String? _error;
   String _rawText = '';
   String _productContent = '';
+  String _seoTitle = '';
+  String _seoDescription = '';
   String _mode = 'append';
   List<SpecItem> _aiSpecs = [];
 
@@ -1269,6 +1752,23 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             decoration: const InputDecoration(hintText: 'بعد از تحلیل، یک پاراگراف توضیح محصول اینجا ساخته می‌شود و قابل ویرایش است.'),
                           ),
                           const SizedBox(height: 16),
+                          SectionTitle(icon: Icons.manage_search_rounded, title: 'عنوان و توضیح متای سئو'),
+                          TextField(
+                            maxLength: 60,
+                            controller: TextEditingController(text: _seoTitle)..selection = TextSelection.collapsed(offset: _seoTitle.length),
+                            onChanged: (v) => _seoTitle = v,
+                            decoration: const InputDecoration(labelText: 'عنوان سئو', hintText: 'حداکثر ۱۰ کلمه / ۶۰ کاراکتر'),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            maxLength: 155,
+                            minLines: 2,
+                            maxLines: 4,
+                            controller: TextEditingController(text: _seoDescription)..selection = TextSelection.collapsed(offset: _seoDescription.length),
+                            onChanged: (v) => _seoDescription = v,
+                            decoration: const InputDecoration(labelText: 'توضیح متا', hintText: 'حداکثر ۲۵ کلمه / ۱۵۵ کاراکتر'),
+                          ),
+                          const SizedBox(height: 16),
                           AppCard(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1350,6 +1850,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       setState(() {
         _aiSpecs = result.specs;
         _productContent = result.content;
+        _seoTitle = result.seoTitle;
+        _seoDescription = result.seoDescription;
       });
       _toast(result.specs.isEmpty ? 'اطلاعات فنی واضحی در متن پیدا نشد.' : 'مشخصات و محتوای محصول ساخته شد');
     } catch (e) {
@@ -1387,6 +1889,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 Text(_productContent.trim()),
                 const Divider(height: 22),
               ],
+              if (_seoTitle.trim().isNotEmpty || _seoDescription.trim().isNotEmpty) ...[
+                const Text('سئو:', style: TextStyle(fontWeight: FontWeight.w900)),
+                const SizedBox(height: 6),
+                if (_seoTitle.trim().isNotEmpty) Text('عنوان: ${_seoTitle.trim()}'),
+                if (_seoDescription.trim().isNotEmpty) Text('متا: ${_seoDescription.trim()}'),
+                const Divider(height: 22),
+              ],
               const SizedBox(height: 12),
               ...clean.map((e) => Padding(
                     padding: const EdgeInsets.only(bottom: 6),
@@ -1411,7 +1920,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     if (p == null) return;
     setState(() => _sending = true);
     try {
-      final message = await WordPressApi(s).saveSpecs(productId: p.id, mode: _mode, specs: clean, rawText: _rawText, provider: s.aiProvider, productContent: _productContent);
+      final message = await WordPressApi(s).saveSpecs(productId: p.id, mode: _mode, specs: clean, rawText: _rawText, provider: s.aiProvider, productContent: _productContent, seoTitle: _seoTitle, seoDescription: _seoDescription);
       await _historyStore.add(HistoryItem(productId: p.id, productName: p.name, sku: p.sku, status: 'success', message: message, date: DateTime.now().toString().substring(0, 19)));
       _toast(message);
       await _load();

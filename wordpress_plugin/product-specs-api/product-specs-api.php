@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Product Specs API
  * Description: API امن برای اپلیکیشن ثبت مشخصات فنی محصولات ووکامرس. مشخصات را فقط به‌عنوان ویژگی اختصاصی همان محصول ذخیره می‌کند و هیچ Global Attribute یا pa_ taxonomy نمی‌سازد.
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: Product Specs
  * Requires PHP: 7.4
  * Requires at least: 5.8
@@ -79,7 +79,7 @@ if (!class_exists('PS_Product_Specs_API')) {
             <div class="wrap" dir="rtl">
                 <h1>API مشخصات محصول</h1>
                 <p>این افزونه برای اتصال اپلیکیشن موبایل به ووکامرس است.</p>
-                <p><strong>نکته مهم:</strong> هوش مصنوعی در این نسخه داخل اپلیکیشن اجرا می‌شود. این افزونه فقط محصولات را می‌خواند و مشخصات نهایی را به‌عنوان ویژگی اختصاصی همان محصول ذخیره می‌کند.</p>
+                <p><strong>نکته مهم:</strong> هوش مصنوعی در این نسخه داخل اپلیکیشن اجرا می‌شود. این افزونه محصولات را می‌خواند، ورود مدیر فروشگاه/مدیر سایت را بررسی می‌کند و مشخصات نهایی را به‌عنوان ویژگی اختصاصی همان محصول ذخیره می‌کند.</p>
 
                 <form method="post">
                     <?php wp_nonce_field('ps_specs_settings'); ?>
@@ -104,7 +104,8 @@ if (!class_exists('PS_Product_Specs_API')) {
 
                 <hr>
                 <h2>آدرس‌های API</h2>
-                <pre style="background:#fff;padding:16px;border:1px solid #ddd;direction:ltr;text-align:left;white-space:pre-wrap;">GET  <?php echo esc_url_raw(rest_url(self::REST_NS . '/ping')); ?>
+                <pre style="background:#fff;padding:16px;border:1px solid #ddd;direction:ltr;text-align:left;white-space:pre-wrap;">POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/login')); ?>
+GET  <?php echo esc_url_raw(rest_url(self::REST_NS . '/ping')); ?>
 GET  <?php echo esc_url_raw(rest_url(self::REST_NS . '/categories')); ?>
 GET  <?php echo esc_url_raw(rest_url(self::REST_NS . '/products?category_id=12')); ?>
 GET  <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123')); ?>
@@ -116,6 +117,12 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
         }
 
         public function register_routes() {
+            register_rest_route(self::REST_NS, '/login', array(
+                'methods' => 'POST',
+                'callback' => array($this, 'login'),
+                'permission_callback' => array($this, 'check_permission'),
+            ));
+
             register_rest_route(self::REST_NS, '/ping', array(
                 'methods' => 'GET',
                 'callback' => array($this, 'ping'),
@@ -175,6 +182,76 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
                 return new WP_Error('ps_woo_missing', 'ووکامرس فعال نیست.', array('status' => 500));
             }
             return true;
+        }
+
+        public function login(WP_REST_Request $request) {
+            $params = $request->get_json_params();
+            if (!is_array($params)) {
+                return new WP_Error('ps_bad_request', 'داده ورود معتبر نیست.', array('status' => 400));
+            }
+
+            $username = isset($params['username']) ? sanitize_user((string) $params['username']) : '';
+            $password = isset($params['password']) ? (string) $params['password'] : '';
+            if ($username === '' || $password === '') {
+                return new WP_Error('ps_login_empty', 'نام کاربری و رمز عبور الزامی است.', array('status' => 400));
+            }
+
+            $lock_key = $this->login_lock_key($username);
+            $lock_until = get_transient($lock_key . '_until');
+            if ($lock_until && time() < (int) $lock_until) {
+                return new WP_Error('ps_login_locked', 'به دلیل ورود اشتباه، ۱۰ دقیقه بعد دوباره تلاش کنید.', array('status' => 429));
+            }
+
+            $user = wp_authenticate($username, $password);
+            if (is_wp_error($user)) {
+                $count_key = $lock_key . '_count';
+                $count = (int) get_transient($count_key);
+                $count++;
+                set_transient($count_key, $count, 10 * MINUTE_IN_SECONDS);
+                if ($count >= 5) {
+                    set_transient($lock_key . '_until', time() + (10 * MINUTE_IN_SECONDS), 10 * MINUTE_IN_SECONDS);
+                    delete_transient($count_key);
+                    return new WP_Error('ps_login_locked', '۵ بار ورود اشتباه ثبت شد. ۱۰ دقیقه بعد دوباره تلاش کنید.', array('status' => 429));
+                }
+                return new WP_Error('ps_login_failed', 'نام کاربری یا رمز عبور اشتباه است.', array('status' => 401));
+            }
+
+            if (!$this->user_can_use_app($user)) {
+                return new WP_Error('ps_login_forbidden', 'فقط مدیر سایت یا مدیر فروشگاه اجازه ورود به اپلیکیشن را دارد.', array('status' => 403));
+            }
+
+            delete_transient($lock_key . '_count');
+            delete_transient($lock_key . '_until');
+
+            return rest_ensure_response(array(
+                'success' => true,
+                'message' => 'ورود موفق بود.',
+                'user' => array(
+                    'id' => (int) $user->ID,
+                    'username' => $user->user_login,
+                    'display_name' => $user->display_name,
+                    'roles' => array_values((array) $user->roles),
+                ),
+            ));
+        }
+
+        private function user_can_use_app($user) {
+            if (!$user || empty($user->ID)) {
+                return false;
+            }
+            $allowed_roles = array('administrator', 'shop_manager');
+            $roles = (array) $user->roles;
+            foreach ($allowed_roles as $role) {
+                if (in_array($role, $roles, true)) {
+                    return true;
+                }
+            }
+            return user_can($user, 'manage_woocommerce') || user_can($user, 'manage_options') || user_can($user, 'edit_products');
+        }
+
+        private function login_lock_key($username) {
+            $ip = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : '';
+            return 'ps_login_' . md5(strtolower($username) . '|' . $ip);
         }
 
         public function ping() {
@@ -334,6 +411,15 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
                 }
             }
 
+            $seo_title = '';
+            if (isset($params['seo_title'])) {
+                $seo_title = $this->limit_words($this->limit_chars(sanitize_text_field((string) $params['seo_title']), 60), 10);
+            }
+            $seo_description = '';
+            if (isset($params['seo_description'])) {
+                $seo_description = $this->limit_words($this->limit_chars(sanitize_text_field((string) $params['seo_description']), 155), 25);
+            }
+
             $attributes = $product->get_attributes();
             $new_attributes = array();
 
@@ -369,6 +455,19 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
             }
             $product->save();
 
+            if ($seo_title !== '') {
+                update_post_meta($id, 'rank_math_title', $seo_title);
+                update_post_meta($id, '_yoast_wpseo_title', $seo_title);
+                update_post_meta($id, '_aioseo_title', $seo_title);
+                update_post_meta($id, '_ps_specs_seo_title', $seo_title);
+            }
+            if ($seo_description !== '') {
+                update_post_meta($id, 'rank_math_description', $seo_description);
+                update_post_meta($id, '_yoast_wpseo_metadesc', $seo_description);
+                update_post_meta($id, '_aioseo_description', $seo_description);
+                update_post_meta($id, '_ps_specs_seo_description', $seo_description);
+            }
+
             update_post_meta($id, '_ps_specs_updated', current_time('mysql'));
             update_post_meta($id, '_ps_specs_last_mode', $mode);
             if (isset($params['raw_text'])) {
@@ -380,6 +479,12 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
             if ($product_content !== '') {
                 update_post_meta($id, '_ps_specs_last_product_content', wp_strip_all_tags($product_content));
             }
+            if ($seo_title !== '') {
+                update_post_meta($id, '_ps_specs_last_seo_title', $seo_title);
+            }
+            if ($seo_description !== '') {
+                update_post_meta($id, '_ps_specs_last_seo_description', $seo_description);
+            }
 
             wc_delete_product_transients($id);
             clean_post_cache($id);
@@ -390,6 +495,7 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
                 'mode' => $mode,
                 'saved_count' => count($clean_specs),
                 'content_saved' => $product_content !== '',
+                'seo_saved' => ($seo_title !== '' || $seo_description !== ''),
                 'attributes' => $this->get_product_attributes(wc_get_product($id)),
             ));
         }
@@ -459,6 +565,26 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
                 }
             }
             return $out;
+        }
+
+        private function limit_chars($text, $max) {
+            $text = trim((string) $text);
+            if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+                return mb_strlen($text, 'UTF-8') > $max ? trim(mb_substr($text, 0, $max, 'UTF-8')) : $text;
+            }
+            return strlen($text) > $max ? trim(substr($text, 0, $max)) : $text;
+        }
+
+        private function limit_words($text, $max_words) {
+            $text = trim((string) $text);
+            if ($text === '') {
+                return '';
+            }
+            $parts = preg_split('/\s+/u', $text);
+            if (!is_array($parts) || count($parts) <= $max_words) {
+                return $text;
+            }
+            return implode(' ', array_slice($parts, 0, $max_words));
         }
 
         private function custom_attribute_key($name) {

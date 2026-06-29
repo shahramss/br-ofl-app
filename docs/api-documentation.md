@@ -77,3 +77,36 @@ replace = جایگزینی ویژگی‌های اختصاصی قبلی
 ```text
 این محصول با ارسال فوری از بازار قفل سفارش بدید
 ```
+
+## API ورود وردپرس
+
+```http
+POST /wp-json/product-specs/v1/login
+Authorization: Bearer YOUR_APP_TOKEN
+Content-Type: application/json
+```
+
+ورودی:
+
+```json
+{
+  "username": "admin",
+  "password": "wordpress-password"
+}
+```
+
+فقط کاربران با نقش `administrator` یا `shop_manager` اجازه ورود دارند. بعد از ۵ ورود اشتباه، ورود به مدت ۱۰ دقیقه قفل می‌شود.
+
+## فیلدهای جدید ذخیره محصول
+
+در endpoint ذخیره مشخصات، این فیلدها هم پشتیبانی می‌شوند:
+
+```json
+{
+  "product_content": "توضیح یک پاراگرافی محصول",
+  "seo_title": "عنوان سئو",
+  "seo_description": "توضیح متا"
+}
+```
+
+افزونه عنوان و توضیح متا را برای RankMath، Yoast و AIOSEO به‌صورت meta ذخیره می‌کند.
