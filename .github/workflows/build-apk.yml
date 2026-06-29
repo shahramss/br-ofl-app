@@ -2,48 +2,68 @@ name: Build Android APK
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build:
+  build-debug-apk:
     name: Build Debug APK
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: mobile_app
-
     steps:
-      - name: Checkout project
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Flutter
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
           channel: stable
           cache: true
 
-      - name: Flutter version
-        run: flutter --version
+      - name: Prepare Flutter Android project
+        working-directory: mobile_app
+        run: |
+          flutter --version
+          flutter create --platforms=android --project-name product_specs_app .
 
-      - name: Get packages
+      - name: Install dependencies
+        working-directory: mobile_app
         run: flutter pub get
 
+      - name: Add Android permissions and app label
+        working-directory: mobile_app
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('android/app/src/main/AndroidManifest.xml')
+          text = path.read_text()
+          manifest = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          perms = '''<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />'''
+          if 'android.permission.INTERNET' not in text:
+              text = text.replace(manifest, perms)
+          text = text.replace('android:label="product_specs_app"', 'android:label="اپ مشخصات محصول"')
+          path.write_text(text)
+          PY
+
+      - name: Analyze project
+        working-directory: mobile_app
+        run: flutter analyze
+
       - name: Build Debug APK
+        working-directory: mobile_app
         run: flutter build apk --debug
 
-      - name: Upload APK Artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: product-specs-debug-apk
           path: mobile_app/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
