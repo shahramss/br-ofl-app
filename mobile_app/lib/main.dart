@@ -2107,8 +2107,8 @@ class StatusPill extends StatelessWidget {
 
 class ErrorBox extends StatelessWidget {
   final String message;
-  final VoidCallback onRetry;
-  const ErrorBox({super.key, required this.message, required this.onRetry});
+  final VoidCallback? onRetry;
+  const ErrorBox({super.key, required this.message, this.onRetry});
 
   @override
   Widget build(BuildContext context) {
@@ -2117,8 +2117,10 @@ class ErrorBox extends StatelessWidget {
         Icon(Icons.error_outline_rounded, color: Colors.red.shade700, size: 40),
         const SizedBox(height: 10),
         Text(message, textAlign: TextAlign.center),
-        const SizedBox(height: 12),
-        AppButton(text: 'تلاش دوباره', icon: Icons.refresh_rounded, outlined: true, onPressed: onRetry),
+        if (onRetry != null) ...[
+          const SizedBox(height: 12),
+          AppButton(text: 'تلاش دوباره', icon: Icons.refresh_rounded, outlined: true, onPressed: onRetry),
+        ],
       ]),
     );
   }
