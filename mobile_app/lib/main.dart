@@ -743,14 +743,14 @@ $rawText
 ۲. اگر کاربر هر مشخصه دیگری هم گفت، حتی اگر در لیست‌های معمول دسته‌بندی نبود، آن را هم به مشخصات اضافه کن.
 ۳. هیچ مقدار حدسی، تبلیغاتی یا ساختگی نساز.
 ۴. اگر چیزی گفته نشده، آن فیلد را برنگردان.
-۵. بر اساس نام محصول و مشخصات استخراج‌شده، یک پاراگراف توضیح محصول بساز؛ متن کمی کامل‌تر باشد، حدود ۷۰ تا ۱۱۰ کلمه فارسی، اما فقط یک پاراگراف باشد.
+۵. بر اساس نام محصول و مشخصات استخراج‌شده، یک پاراگراف توضیح محصول بساز؛ متن کامل‌تر و کاربردی‌تر باشد، حدود ۹۰ تا ۱۴۰ کلمه فارسی، اما فقط یک پاراگراف باشد.
 ۶. پاراگراف فقط بر اساس اطلاعات موجود باشد و ویژگی ساختگی، ادعای دروغ، گزافه‌گویی، تبلیغات اغراق‌آمیز، بهترین/ارزان‌ترین/تضمینی بودن یا مقایسه بی‌دلیل اضافه نکند.
 ۷. آخر پاراگراف دقیقاً این جمله را اضافه کن: این محصول با ارسال فوری از بازار قفل سفارش بدید
-۸. یک عنوان سئو یکتا بساز که بر اساس نام محصول و مشخصات مهم باشد. عنوان سئو حداکثر ۱۰ کلمه و حداکثر ۶۰ کاراکتر باشد.
-۹. یک توضیح متا یکتا بساز که بر اساس نام و مشخصات باشد. توضیح متا حداکثر ۲۵ کلمه و حداکثر ۱۵۵ کاراکتر باشد و اغراق یا ادعای ساختگی نداشته باشد.
+۸. یک عنوان سئو یکتا بساز که برای محصول مناسب فروشگاهی باشد. ترجیحاً با «قیمت و خرید» شروع شود، نام محصول را داشته باشد و اگر مشخصات مهم وجود دارد یکی از آن‌ها را کوتاه اضافه کند. می‌توان از عبارت‌هایی مثل «قیمت عمده»، «خرید عمده» یا «ارسال سریع» استفاده کرد، اما عنوان تکراری و کلی نساز. عنوان حداکثر ۱۰ کلمه و حداکثر ۶۰ کاراکتر باشد.
+۹. یک توضیح متای یکتا و کوتاه بساز که شامل نام محصول و ۱ تا ۳ مشخصه مهم باشد. متن متا برای همه محصولات شبیه هم نباشد؛ عبارت‌های فروشگاهی را طبیعی و متنوع استفاده کن، مثل خرید با قیمت عمده، ارسال سریع یا خرید از واردکننده؛ اما ادعای دروغ یا غیرقابل اثبات ننویس. توضیح متا حداکثر ۲۵ کلمه و حداکثر ۱۵۵ کاراکتر باشد.
 خروجی فقط JSON معتبر باشد، بدون توضیح اضافه.
 فرمت دقیق:
-{"specs":[{"name":"قطر","value":"۱۰ میلی‌متر"},{"name":"جنس","value":"فولاد"}],"content":"این محصول با قطر ۱۰ میلی‌متر و جنس فولاد برای استفاده‌های فنی مرتبط با مشخصات اعلام‌شده مناسب است و انتخاب آن برای کاربرانی که به دنبال ثبت دقیق مشخصات محصول هستند، می‌تواند کمک‌کننده باشد. این محصول با ارسال فوری از بازار قفل سفارش بدید","seo_title":"سنبه قطر ۱۰ میلی‌متر فولادی","seo_description":"مشخصات سنبه قطر ۱۰ میلی‌متر با جنس فولاد و توضیحات فنی محصول را بررسی کنید."}
+{"specs":[{"name":"قطر","value":"۱۰ میلی‌متر"},{"name":"جنس","value":"فولاد"}],"content":"این محصول با قطر ۱۰ میلی‌متر و جنس فولاد برای استفاده‌های فنی مرتبط با مشخصات اعلام‌شده مناسب است. با توجه به ابعاد و جنس گفته‌شده، می‌توان آن را برای انتخاب دقیق‌تر در زمان خرید و مقایسه مشخصات محصول بررسی کرد. در توضیحات این محصول فقط اطلاعاتی آمده که از متن ثبت‌شده استخراج شده و از افزودن ویژگی‌های نامشخص یا ادعاهای غیرواقعی خودداری شده است. این محصول با ارسال فوری از بازار قفل سفارش بدید","seo_title":"قیمت و خرید سنبه قطر ۱۰ میلی‌متر عمده","seo_description":"خرید سنبه قطر ۱۰ میلی‌متر با جنس فولاد، مناسب بررسی مشخصات فنی و سفارش با قیمت عمده و ارسال سریع."}
 ''';
 
     final body = {
@@ -828,15 +828,18 @@ $rawText
   }
 
   String _buildFallbackSeoTitle(String productName, List<SpecItem> specs) {
-    final main = specs.take(2).map((e) => '${e.name} ${e.value}').join(' ');
-    final text = main.trim().isEmpty ? productName.trim() : '${productName.trim()} $main';
+    final name = productName.trim().isEmpty ? 'محصول' : productName.trim();
+    final main = specs.take(1).map((e) => '${e.name} ${e.value}').join(' ').trim();
+    final text = main.isEmpty ? 'قیمت و خرید $name' : 'قیمت و خرید $name $main';
     return _limitWords(_limitChars(text.trim(), 60), 10);
   }
 
   String _buildFallbackSeoDescription(String productName, List<SpecItem> specs) {
-    final parts = specs.take(4).map((e) => '${e.name} ${e.value}').join('، ');
+    final parts = specs.take(3).map((e) => '${e.name} ${e.value}').join('، ');
     final name = productName.trim().isEmpty ? 'محصول' : productName.trim();
-    final text = parts.isEmpty ? 'بررسی مشخصات فنی $name و اطلاعات کاربردی محصول.' : 'بررسی مشخصات فنی $name شامل $parts و اطلاعات کاربردی محصول.';
+    final text = parts.isEmpty
+        ? 'خرید $name با امکان بررسی مشخصات محصول، قیمت مناسب و ارسال سریع.'
+        : 'خرید $name با $parts، مناسب بررسی مشخصات فنی، قیمت عمده و ارسال سریع.';
     return _limitWords(_limitChars(text, 155), 25);
   }
 
@@ -1257,7 +1260,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             const Icon(Icons.verified_user_rounded, color: Colors.green),
             const SizedBox(width: 8),
-            Expanded(child: Text('$label ذخیره شده است و قابل مشاهده یا کپی نیست.', style: const TextStyle(color: kMuted))),
+            Expanded(child: Text('$label ثبت شده است.', style: const TextStyle(color: kMuted))),
             TextButton(onPressed: onReplace, child: const Text('پاک کردن و ثبت جدید')),
           ],
         ),
@@ -1269,7 +1272,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       enableInteractiveSelection: false,
       autocorrect: false,
       textDirection: TextDirection.ltr,
-      decoration: InputDecoration(labelText: label, hintText: 'کلید را وارد کنید؛ بعد از ذخیره دیگر دیده نمی‌شود', prefixIcon: const Icon(Icons.lock_rounded)),
+      decoration: InputDecoration(labelText: label, hintText: 'کلید API را وارد کنید', prefixIcon: const Icon(Icons.lock_rounded)),
     );
   }
 
@@ -1644,6 +1647,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   bool _sending = false;
   String? _error;
   String _rawText = '';
+  String _listenBaseText = '';
   String _productContent = '';
   String _seoTitle = '';
   String _seoDescription = '';
@@ -1821,12 +1825,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       _toast('تبدیل گفتار به متن روی این گوشی فعال نیست. می‌توانید متن را دستی تایپ کنید.', error: true);
       return;
     }
+    _listenBaseText = _rawText.trim();
     setState(() => _listening = true);
     await _speech.listen(
       localeId: 'fa_IR',
       listenMode: ListenMode.dictation,
       onResult: (SpeechRecognitionResult result) {
-        setState(() => _rawText = result.recognizedWords);
+        final words = result.recognizedWords.trim();
+        final combined = [_listenBaseText, words].where((e) => e.trim().isNotEmpty).join(' ');
+        setState(() => _rawText = combined);
       },
     );
   }
