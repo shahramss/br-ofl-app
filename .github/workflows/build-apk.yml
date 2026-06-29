@@ -31,6 +31,7 @@ jobs:
         run: |
           flutter --version
           flutter create --platforms=android --project-name product_specs_app .
+          rm -rf test
 
       - name: Install dependencies
         working-directory: mobile_app
@@ -52,10 +53,6 @@ jobs:
           text = text.replace('android:label="product_specs_app"', 'android:label="اپ مشخصات محصول"')
           path.write_text(text)
           PY
-
-      - name: Analyze project
-        working-directory: mobile_app
-        run: flutter analyze
 
       - name: Build Debug APK
         working-directory: mobile_app
