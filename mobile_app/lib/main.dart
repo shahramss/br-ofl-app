@@ -414,6 +414,13 @@ class SpecItem {
   Map<String, dynamic> toJson() => {'name': name.trim(), 'value': value.trim()};
 }
 
+
+class AiExtractResult {
+  final List<SpecItem> specs;
+  final String content;
+  const AiExtractResult({required this.specs, required this.content});
+}
+
 class ProductDetails {
   final int id;
   final String name;
@@ -529,13 +536,14 @@ class WordPressApi {
     return ProductDetails.fromJson(data);
   }
 
-  Future<String> saveSpecs({required int productId, required String mode, required List<SpecItem> specs, required String rawText, required String provider}) async {
+  Future<String> saveSpecs({required int productId, required String mode, required List<SpecItem> specs, required String rawText, required String provider, required String productContent}) async {
     final clean = specs.where((e) => e.name.trim().isNotEmpty && e.value.trim().isNotEmpty).map((e) => e.toJson()).toList();
     final data = await _postJson(_uri('/products/$productId/specs'), {
       'mode': mode,
       'specs': clean,
       'raw_text': rawText,
       'ai_provider': provider,
+      'product_content': productContent,
     });
     return '${data['message'] ?? 'مشخصات ذخیره شد'}';
   }
@@ -545,7 +553,7 @@ class AiClient {
   final AppSettings settings;
   AiClient(this.settings);
 
-  Future<List<SpecItem>> extractSpecs({required String rawText, required String productName, required String categoryName, required List<SpecItem> currentAttributes}) async {
+  Future<AiExtractResult> extractSpecs({required String rawText, required String productName, required String categoryName, required List<SpecItem> currentAttributes}) async {
     final provider = settings.aiProvider;
     final apiKey = provider == 'deepseek' ? settings.deepseekKey.trim() : settings.openaiKey.trim();
     final model = provider == 'deepseek' ? settings.deepseekModel.trim() : settings.openaiModel.trim();
@@ -568,12 +576,16 @@ $current
 $rawText
 
 وظیفه:
-فقط اطلاعات فنی‌ای را که در متن خام صریحاً گفته شده استخراج کن.
-هیچ مقدار حدسی، تبلیغاتی یا ساختگی نساز.
-اگر چیزی گفته نشده، آن فیلد را برنگردان.
+۱. فقط اطلاعات فنی‌ای را که در متن خام صریحاً گفته شده استخراج کن.
+۲. اگر کاربر هر مشخصه دیگری هم گفت، حتی اگر در لیست‌های معمول دسته‌بندی نبود، آن را هم به مشخصات اضافه کن.
+۳. هیچ مقدار حدسی، تبلیغاتی یا ساختگی نساز.
+۴. اگر چیزی گفته نشده، آن فیلد را برنگردان.
+۵. بر اساس نام محصول و مشخصات استخراج‌شده، یک پاراگراف کوتاه و طبیعی برای توضیح محصول بساز.
+۶. پاراگراف فقط بر اساس اطلاعات موجود باشد و ویژگی ساختگی اضافه نکند.
+۷. آخر پاراگراف دقیقاً این جمله را اضافه کن: این محصول با ارسال فوری از بازار قفل سفارش بدید
 خروجی فقط JSON معتبر باشد، بدون توضیح اضافه.
 فرمت دقیق:
-{"specs":[{"name":"قطر","value":"۱۰ میلی‌متر"},{"name":"جنس","value":"فولاد"}]}
+{"specs":[{"name":"قطر","value":"۱۰ میلی‌متر"},{"name":"جنس","value":"فولاد"}],"content":"این محصول با قطر ۱۰ میلی‌متر و جنس فولاد برای کاربردهای فنی مناسب است. این محصول با ارسال فوری از بازار قفل سفارش بدید"}
 ''';
 
     final body = {
@@ -581,7 +593,7 @@ $rawText
       'messages': [
         {
           'role': 'system',
-          'content': 'تو یک دستیار استخراج مشخصات فنی محصولات فروشگاهی هستی. خروجی فقط JSON معتبر بده.'
+          'content': 'تو یک دستیار استخراج مشخصات فنی و تولید توضیح کوتاه محصول برای فروشگاه هستی. خروجی فقط JSON معتبر بده.'
         },
         {'role': 'user', 'content': prompt}
       ],
@@ -607,25 +619,43 @@ $rawText
       }
 
       final data = jsonDecode(decodedBody);
-      String content = '';
+      String aiContent = '';
       if (data is Map && data['choices'] is List && (data['choices'] as List).isNotEmpty) {
         final first = (data['choices'] as List).first;
         if (first is Map && first['message'] is Map) {
-          content = '${(first['message'] as Map)['content'] ?? ''}';
+          aiContent = '${(first['message'] as Map)['content'] ?? ''}';
         }
       }
-      final jsonText = _extractJsonText(content);
+      final jsonText = _extractJsonText(aiContent);
       final parsed = jsonDecode(jsonText);
       final specsRaw = parsed['specs'];
-      if (specsRaw is! List) return [];
-      return specsRaw
-          .map((e) => SpecItem.fromJson(Map<String, dynamic>.from(e)))
-          .where((e) => e.name.trim().isNotEmpty && e.value.trim().isNotEmpty)
-          .toList();
+      final specs = specsRaw is List
+          ? specsRaw
+              .map((e) => SpecItem.fromJson(Map<String, dynamic>.from(e)))
+              .where((e) => e.name.trim().isNotEmpty && e.value.trim().isNotEmpty)
+              .toList()
+          : <SpecItem>[];
+      var productContent = '${parsed['content'] ?? ''}'.trim();
+      if (productContent.isEmpty && specs.isNotEmpty) {
+        productContent = _buildFallbackContent(productName, specs);
+      }
+      return AiExtractResult(specs: specs, content: productContent);
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('تحلیل با هوش مصنوعی انجام نشد. کلید API، مدل و اینترنت گوشی را بررسی کنید. جزئیات: $e');
     }
+  }
+
+  String _buildFallbackContent(String productName, List<SpecItem> specs) {
+    final parts = specs
+        .where((e) => e.name.trim().isNotEmpty && e.value.trim().isNotEmpty)
+        .map((e) => '${e.name.trim()} ${e.value.trim()}')
+        .join('، ');
+    final name = productName.trim().isEmpty ? 'این محصول' : productName.trim();
+    final base = parts.isEmpty
+        ? '$name یک محصول کاربردی برای استفاده‌های فنی و فروشگاهی است.'
+        : '$name با مشخصاتی مانند $parts برای استفاده‌های فنی و فروشگاهی مناسب است.';
+    return '$base این محصول با ارسال فوری از بازار قفل سفارش بدید';
   }
 
   String _safeError(String body) {
@@ -1133,6 +1163,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   bool _sending = false;
   String? _error;
   String _rawText = '';
+  String _productContent = '';
   String _mode = 'append';
   List<SpecItem> _aiSpecs = [];
 
@@ -1229,6 +1260,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             ),
                           ),
                           const SizedBox(height: 16),
+                          SectionTitle(icon: Icons.article_outlined, title: 'محتوای محصول'),
+                          TextField(
+                            minLines: 4,
+                            maxLines: 8,
+                            controller: TextEditingController(text: _productContent)..selection = TextSelection.collapsed(offset: _productContent.length),
+                            onChanged: (v) => _productContent = v,
+                            decoration: const InputDecoration(hintText: 'بعد از تحلیل، یک پاراگراف توضیح محصول اینجا ساخته می‌شود و قابل ویرایش است.'),
+                          ),
+                          const SizedBox(height: 16),
                           AppCard(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1301,14 +1341,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     }
     setState(() => _analyzing = true);
     try {
-      final specs = await AiClient(s).extractSpecs(
+      final result = await AiClient(s).extractSpecs(
         rawText: _rawText,
         productName: p.name,
         categoryName: p.categoryNames.join('، '),
         currentAttributes: p.attributes,
       );
-      setState(() => _aiSpecs = specs);
-      _toast(specs.isEmpty ? 'اطلاعات فنی واضحی در متن پیدا نشد.' : 'مشخصات استخراج شد');
+      setState(() {
+        _aiSpecs = result.specs;
+        _productContent = result.content;
+      });
+      _toast(result.specs.isEmpty ? 'اطلاعات فنی واضحی در متن پیدا نشد.' : 'مشخصات و محتوای محصول ساخته شد');
     } catch (e) {
       _toast('$e', error: true);
     } finally {
@@ -1338,6 +1381,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               Text('شناسه: ${p.id} | SKU: ${p.sku}'),
               const Divider(height: 22),
               Text(_mode == 'append' ? 'روش ذخیره: افزودن به قبلی' : 'روش ذخیره: جایگزینی قبلی', style: const TextStyle(color: kOrangeDark, fontWeight: FontWeight.w800)),
+              if (_productContent.trim().isNotEmpty) ...[
+                const Text('محتوای محصول:', style: TextStyle(fontWeight: FontWeight.w900)),
+                const SizedBox(height: 6),
+                Text(_productContent.trim()),
+                const Divider(height: 22),
+              ],
               const SizedBox(height: 12),
               ...clean.map((e) => Padding(
                     padding: const EdgeInsets.only(bottom: 6),
@@ -1362,7 +1411,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     if (p == null) return;
     setState(() => _sending = true);
     try {
-      final message = await WordPressApi(s).saveSpecs(productId: p.id, mode: _mode, specs: clean, rawText: _rawText, provider: s.aiProvider);
+      final message = await WordPressApi(s).saveSpecs(productId: p.id, mode: _mode, specs: clean, rawText: _rawText, provider: s.aiProvider, productContent: _productContent);
       await _historyStore.add(HistoryItem(productId: p.id, productName: p.name, sku: p.sku, status: 'success', message: message, date: DateTime.now().toString().substring(0, 19)));
       _toast(message);
       await _load();

@@ -323,6 +323,17 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
                 return new WP_Error('ps_empty_specs', 'هیچ مشخصه معتبری برای ذخیره ارسال نشده است.', array('status' => 400));
             }
 
+            $product_content = '';
+            if (isset($params['product_content'])) {
+                $product_content = trim(wp_kses_post((string) $params['product_content']));
+                if ($product_content !== '') {
+                    $required_sentence = 'این محصول با ارسال فوری از بازار قفل سفارش بدید';
+                    if (strpos(wp_strip_all_tags($product_content), $required_sentence) === false) {
+                        $product_content .= ' ' . $required_sentence;
+                    }
+                }
+            }
+
             $attributes = $product->get_attributes();
             $new_attributes = array();
 
@@ -353,6 +364,9 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
             }
 
             $product->set_attributes($new_attributes);
+            if ($product_content !== '') {
+                $product->set_short_description($product_content);
+            }
             $product->save();
 
             update_post_meta($id, '_ps_specs_updated', current_time('mysql'));
@@ -363,6 +377,9 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
             if (isset($params['ai_provider'])) {
                 update_post_meta($id, '_ps_specs_last_ai_provider', sanitize_text_field((string) $params['ai_provider']));
             }
+            if ($product_content !== '') {
+                update_post_meta($id, '_ps_specs_last_product_content', wp_strip_all_tags($product_content));
+            }
 
             wc_delete_product_transients($id);
             clean_post_cache($id);
@@ -372,6 +389,7 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
                 'message' => 'مشخصات با موفقیت روی محصول ذخیره شد.',
                 'mode' => $mode,
                 'saved_count' => count($clean_specs),
+                'content_saved' => $product_content !== '',
                 'attributes' => $this->get_product_attributes(wc_get_product($id)),
             ));
         }
