@@ -787,11 +787,11 @@ $rawText
 ۵. بر اساس نام محصول و مشخصات استخراج‌شده، یک پاراگراف توضیح محصول بساز؛ متن کامل‌تر و کاربردی‌تر باشد، حدود ۹۰ تا ۱۴۰ کلمه فارسی، اما فقط یک پاراگراف باشد.
 ۶. پاراگراف فقط بر اساس اطلاعات موجود باشد و ویژگی ساختگی، ادعای دروغ، گزافه‌گویی، تبلیغات اغراق‌آمیز، بهترین/ارزان‌ترین/تضمینی بودن یا مقایسه بی‌دلیل اضافه نکند.
 ۷. آخر پاراگراف دقیقاً این جمله را اضافه کن: این محصول با ارسال فوری از بازار قفل سفارش بدید
-۸. یک عنوان سئو یکتا بساز که برای محصول مناسب فروشگاهی باشد. ترجیحاً با «قیمت و خرید» شروع شود، نام محصول را داشته باشد و اگر مشخصات مهم وجود دارد یکی از آن‌ها را کوتاه اضافه کند. می‌توان از عبارت‌هایی مثل «قیمت عمده»، «خرید عمده» یا «ارسال سریع» استفاده کرد، اما عنوان تکراری و کلی نساز. عنوان حداکثر ۱۰ کلمه و حداکثر ۶۰ کاراکتر باشد.
+۸. عنوان سئو را فقط و فقط با این الگو بساز: «قیمت و خرید + نام محصول». هیچ کلمه، مشخصه، عدد، برند، عبارت تبلیغاتی، قیمت عمده، ارزان، ارسال سریع یا چیز دیگری به عنوان سئو اضافه نکن. فقط همین ساختار باشد.
 ۹. یک توضیح متای یکتا و کوتاه بساز که شامل نام محصول و ۱ تا ۳ مشخصه مهم باشد. متن متا برای همه محصولات شبیه هم نباشد؛ عبارت‌های فروشگاهی را طبیعی و متنوع استفاده کن، مثل خرید با قیمت عمده، ارسال سریع یا خرید از واردکننده؛ اما ادعای دروغ یا غیرقابل اثبات ننویس. توضیح متا حداکثر ۲۵ کلمه و حداکثر ۱۵۵ کاراکتر باشد.
 خروجی فقط JSON معتبر باشد، بدون توضیح اضافه.
 فرمت دقیق:
-{"specs":[{"name":"قطر","value":"۱۰ میلی‌متر"},{"name":"جنس","value":"فولاد"}],"content":"این محصول با قطر ۱۰ میلی‌متر و جنس فولاد برای استفاده‌های فنی مرتبط با مشخصات اعلام‌شده مناسب است. با توجه به ابعاد و جنس گفته‌شده، می‌توان آن را برای انتخاب دقیق‌تر در زمان خرید و مقایسه مشخصات محصول بررسی کرد. در توضیحات این محصول فقط اطلاعاتی آمده که از متن ثبت‌شده استخراج شده و از افزودن ویژگی‌های نامشخص یا ادعاهای غیرواقعی خودداری شده است. این محصول با ارسال فوری از بازار قفل سفارش بدید","seo_title":"قیمت و خرید سنبه قطر ۱۰ میلی‌متر عمده","seo_description":"خرید سنبه قطر ۱۰ میلی‌متر با جنس فولاد، مناسب بررسی مشخصات فنی و سفارش با قیمت عمده و ارسال سریع."}
+{"specs":[{"name":"قطر","value":"۱۰ میلی‌متر"},{"name":"جنس","value":"فولاد"}],"content":"این محصول با قطر ۱۰ میلی‌متر و جنس فولاد برای استفاده‌های فنی مرتبط با مشخصات اعلام‌شده مناسب است. با توجه به ابعاد و جنس گفته‌شده، می‌توان آن را برای انتخاب دقیق‌تر در زمان خرید و مقایسه مشخصات محصول بررسی کرد. در توضیحات این محصول فقط اطلاعاتی آمده که از متن ثبت‌شده استخراج شده و از افزودن ویژگی‌های نامشخص یا ادعاهای غیرواقعی خودداری شده است. این محصول با ارسال فوری از بازار قفل سفارش بدید","seo_title":"قیمت و خرید سنبه","seo_description":"خرید سنبه قطر ۱۰ میلی‌متر با جنس فولاد، مناسب بررسی مشخصات فنی و سفارش با قیمت عمده و ارسال سریع."}
 ''';
 
     final body = {
@@ -845,11 +845,10 @@ $rawText
       if (productContent.isEmpty && specs.isNotEmpty) {
         productContent = _buildFallbackContent(productName, specs);
       }
-      var seoTitle = '${parsed['seo_title'] ?? ''}'.trim();
+      var seoTitle = _buildFallbackSeoTitle(productName, specs);
       var seoDescription = '${parsed['seo_description'] ?? ''}'.trim();
-      if (seoTitle.isEmpty) seoTitle = _buildFallbackSeoTitle(productName, specs);
       if (seoDescription.isEmpty) seoDescription = _buildFallbackSeoDescription(productName, specs);
-      return AiExtractResult(specs: specs, content: _limitChars(productContent, 900), seoTitle: _limitWords(_limitChars(seoTitle, 60), 10), seoDescription: _limitWords(_limitChars(seoDescription, 155), 25));
+      return AiExtractResult(specs: specs, content: _limitChars(productContent, 900), seoTitle: _limitChars(seoTitle, 60), seoDescription: _limitWords(_limitChars(seoDescription, 155), 25));
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('تحلیل با هوش مصنوعی انجام نشد. کلید API، مدل و اینترنت گوشی را بررسی کنید. جزئیات: $e');
@@ -870,9 +869,7 @@ $rawText
 
   String _buildFallbackSeoTitle(String productName, List<SpecItem> specs) {
     final name = productName.trim().isEmpty ? 'محصول' : productName.trim();
-    final main = specs.take(1).map((e) => '${e.name} ${e.value}').join(' ').trim();
-    final text = main.isEmpty ? 'قیمت و خرید $name' : 'قیمت و خرید $name $main';
-    return _limitWords(_limitChars(text.trim(), 60), 10);
+    return 'قیمت و خرید $name'.trim();
   }
 
   String _buildFallbackSeoDescription(String productName, List<SpecItem> specs) {
@@ -1809,7 +1806,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             maxLength: 60,
                             controller: TextEditingController(text: _seoTitle)..selection = TextSelection.collapsed(offset: _seoTitle.length),
                             onChanged: (v) => _seoTitle = v,
-                            decoration: const InputDecoration(labelText: 'عنوان سئو', hintText: 'حداکثر ۱۰ کلمه / ۶۰ کاراکتر'),
+                            decoration: const InputDecoration(labelText: 'عنوان سئو', hintText: 'فقط قیمت و خرید + نام محصول'),
                           ),
                           const SizedBox(height: 12),
                           TextField(
