@@ -377,6 +377,59 @@ class AppButton extends StatelessWidget {
   }
 }
 
+
+class HoldToRecordButton extends StatelessWidget {
+  final bool listening;
+  final Future<void> Function() onStart;
+  final Future<void> Function() onStop;
+
+  const HoldToRecordButton({
+    super.key,
+    required this.listening,
+    required this.onStart,
+    required this.onStop,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => onStart(),
+      onTapUp: (_) => onStop(),
+      onTapCancel: () => onStop(),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: double.infinity,
+        minHeight: 62,
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        decoration: BoxDecoration(
+          color: listening ? Colors.red.shade600 : kOrange,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: (listening ? Colors.red : kOrange).withOpacity(0.22),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(listening ? Icons.mic_rounded : Icons.touch_app_rounded, color: Colors.white, size: 25),
+            const SizedBox(width: 10),
+            Text(
+              listening ? 'در حال ضبط؛ دست را بردارید تا تمام شود' : 'برای ضبط ویس، دکمه را نگه دارید',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class AppSettings {
   final String siteUrl;
   final String wpToken;
@@ -494,7 +547,9 @@ class AuthSessionStore {
   }
 
   Future<void> logout() async {
-    await _storage.write(key: _loggedInKey, value: '0');
+    // خروج فقط نشست فعلی اپ را می‌بندد.
+    // نام کاربری و مجوز ورود سریع با اثر انگشت بعد از اولین ورود موفق حفظ می‌شود.
+    await _storage.write(key: _loggedInKey, value: '1');
   }
 }
 
@@ -1764,7 +1819,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           SectionTitle(icon: Icons.description_outlined, title: 'مشخصات فعلی'),
                           AppCard(child: p.attributes.isEmpty ? const Text('برای این محصول مشخصاتی ثبت نشده است.', style: TextStyle(color: kMuted)) : SpecsView(specs: p.attributes)),
                           const SizedBox(height: 16),
-                          AppButton(text: _listening ? 'توقف ضبط ویس' : 'شروع ضبط ویس', icon: _listening ? Icons.stop_rounded : Icons.mic_rounded, onPressed: _toggleListen),
+                          HoldToRecordButton(
+                            listening: _listening,
+                            onStart: _startListening,
+                            onStop: _stopListening,
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'دکمه را نگه دارید تا ضبط انجام شود؛ با برداشتن دست، ضبط تمام می‌شود و متن به ادامه کادر اضافه می‌شود.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: kMuted, fontSize: 12, height: 1.7),
+                          ),
                           const SizedBox(height: 16),
                           SectionTitle(icon: Icons.record_voice_over_rounded, title: 'متن خام ویس'),
                           TextField(
@@ -1852,14 +1917,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
-  Future<void> _toggleListen() async {
-    if (_listening) {
-      await _speech.stop();
-      setState(() => _listening = false);
-      return;
-    }
+  Future<void> _startListening() async {
+    if (_listening) return;
     final available = await _speech.initialize(
-      onError: (e) => _toast('خطای ضبط صدا: ${e.errorMsg}', error: true),
+      onError: (e) {
+        if (mounted) {
+          setState(() => _listening = false);
+          _toast('خطای ضبط صدا: ${e.errorMsg}', error: true);
+        }
+      },
       onStatus: (s) {
         if (s == 'done' || s == 'notListening') {
           if (mounted) setState(() => _listening = false);
@@ -1870,6 +1936,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       _toast('تبدیل گفتار به متن روی این گوشی فعال نیست. می‌توانید متن را دستی تایپ کنید.', error: true);
       return;
     }
+
     _listenBaseText = _rawText.trim();
     setState(() => _listening = true);
     await _speech.listen(
@@ -1878,9 +1945,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       onResult: (SpeechRecognitionResult result) {
         final words = result.recognizedWords.trim();
         final combined = [_listenBaseText, words].where((e) => e.trim().isNotEmpty).join(' ');
-        setState(() => _rawText = combined);
+        if (mounted) setState(() => _rawText = combined);
       },
     );
+  }
+
+  Future<void> _stopListening() async {
+    if (!_listening) return;
+    await _speech.stop();
+    if (mounted) setState(() => _listening = false);
   }
 
   Future<void> _analyze() async {
