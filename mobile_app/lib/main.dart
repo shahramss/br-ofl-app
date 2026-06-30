@@ -400,7 +400,7 @@ class HoldToRecordButton extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         width: double.infinity,
-        minHeight: 62,
+        constraints: const BoxConstraints(minHeight: 62),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
         decoration: BoxDecoration(
           color: listening ? Colors.red.shade600 : kOrange,
