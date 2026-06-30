@@ -18,3 +18,5 @@ dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/app_icon/source_icon.png

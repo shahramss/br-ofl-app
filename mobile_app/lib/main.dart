@@ -106,8 +106,35 @@ class _AuthGateState extends State<AuthGate> {
     if (!_loggedIn) {
       return LoginScreen(onLoggedIn: () => setState(() => _loggedIn = true));
     }
-    return const MainShell();
+    return AuthScope(
+      onLogout: () async {
+        await AuthSessionStore().logout();
+        if (mounted) setState(() => _loggedIn = false);
+      },
+      child: const MainShell(),
+    );
   }
+}
+
+class AuthScope extends InheritedWidget {
+  final Future<void> Function() onLogout;
+
+  const AuthScope({
+    super.key,
+    required this.onLogout,
+    required super.child,
+  });
+
+  static Future<void> logout(BuildContext context) async {
+    final element = context.getElementForInheritedWidgetOfExactType<AuthScope>();
+    final scope = element?.widget as AuthScope?;
+    if (scope != null) {
+      await scope.onLogout();
+    }
+  }
+
+  @override
+  bool updateShouldNotify(AuthScope oldWidget) => onLogout != oldWidget.onLogout;
 }
 
 class MainShell extends StatefulWidget {
@@ -186,6 +213,27 @@ class AppHeader extends StatelessWidget {
     this.showBack = false,
   });
 
+  Future<void> _confirmLogout(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('خروج از اکانت'),
+        content: const Text('می‌خواهید از اکانت وردپرس خارج شوید؟ نام کاربری ذخیره می‌ماند، اما برای ورود بعدی رمز عبور ذخیره نمی‌شود.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('لغو')),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(backgroundColor: kOrange),
+            child: const Text('خروج'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && context.mounted) {
+      await AuthScope.logout(context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -202,7 +250,11 @@ class AppHeader extends StatelessWidget {
                     icon: const Icon(Icons.arrow_back_rounded),
                   )
                 else
-                  const SizedBox(width: 48),
+                  IconButton(
+                    tooltip: 'خروج از اکانت',
+                    onPressed: () => _confirmLogout(context),
+                    icon: const Icon(Icons.logout_rounded, color: kMuted),
+                  ),
                 const Spacer(),
                 const BrandBadge(size: 44),
                 const SizedBox(width: 10),
@@ -254,15 +306,15 @@ class BrandBadge extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [Color(0xFFFF9A3D), kOrangeDark]),
         borderRadius: BorderRadius.circular(size * 0.28),
-        boxShadow: [BoxShadow(color: kOrange.withOpacity(0.22), blurRadius: 16, offset: const Offset(0, 8))],
+        boxShadow: [BoxShadow(color: kOrange.withOpacity(0.20), blurRadius: 18, offset: const Offset(0, 8))],
       ),
-      alignment: Alignment.center,
-      child: Text(
-        'B.AI',
-        textDirection: TextDirection.ltr,
-        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: size * 0.26, letterSpacing: -0.4),
+      clipBehavior: Clip.antiAlias,
+      child: Image.asset(
+        'assets/app_icon/source_icon.png',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
       ),
     );
   }
