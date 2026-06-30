@@ -8,7 +8,6 @@ import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +23,6 @@ const Color kLine = Color(0xFFE5E7EB);
 const String kAppName = 'مدیریت هوشمند';
 const String kAppVersion = '1.1.1';
 const String kFooterText = 'طراحی در گروه وب تیما';
-const String kWebTeamaUrl = 'https://webteama.com';
 
 class ProductSpecsApp extends StatelessWidget {
   const ProductSpecsApp({super.key});
@@ -394,9 +392,13 @@ class HoldToRecordButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTapDown: (_) => onStart(),
-      onTapUp: (_) => onStop(),
-      onTapCancel: () => onStop(),
+      onTap: () {
+        if (listening) {
+          onStop();
+        } else {
+          onStart();
+        }
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         width: double.infinity,
@@ -416,10 +418,10 @@ class HoldToRecordButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(listening ? Icons.mic_rounded : Icons.touch_app_rounded, color: Colors.white, size: 25),
+            Icon(listening ? Icons.mic_rounded : Icons.mic_none_rounded, color: Colors.white, size: 25),
             const SizedBox(width: 10),
             Text(
-              listening ? 'در حال ضبط؛ دست را بردارید تا تمام شود' : 'برای ضبط ویس، دکمه را نگه دارید',
+              listening ? 'در حال ضبط' : 'شروع ضبط ویس',
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900),
             ),
@@ -1159,10 +1161,6 @@ class _LoginScreenState extends State<LoginScreen> {
     return '$h:$m';
   }
 
-  Future<void> _openWebTeama() async {
-    final uri = Uri.parse(kWebTeamaUrl);
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
 
   void _toast(String msg, {bool error = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1224,14 +1222,10 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
             const SizedBox(height: 18),
-            Center(
-              child: Wrap(
-                alignment: WrapAlignment.center,
-                children: [
-                  const Text('طراحی در گروه ', style: TextStyle(color: kMuted)),
-                  InkWell(onTap: _openWebTeama, child: const Text('وب تیما', style: TextStyle(color: kOrangeDark, fontWeight: FontWeight.w900, decoration: TextDecoration.underline))),
-                ],
-              ),
+            const Text(
+              kFooterText,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: kMuted, fontWeight: FontWeight.w700, fontSize: 13),
             ),
             const SizedBox(height: 4),
             const Text('شهرام سعیدنیا', textAlign: TextAlign.center, style: TextStyle(color: kMuted, fontWeight: FontWeight.w700, fontSize: 13)),
@@ -1743,6 +1737,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   AppSettings? _settings;
   bool _loading = true;
   bool _listening = false;
+  bool _holdingRecord = false;
+  bool _speechReady = false;
+  bool _speechRestarting = false;
   bool _analyzing = false;
   bool _sending = false;
   String? _error;
@@ -1826,7 +1823,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           ),
                           const SizedBox(height: 8),
                           const Text(
-                            'دکمه را نگه دارید تا ضبط انجام شود؛ با برداشتن دست، ضبط تمام می‌شود و متن به ادامه کادر اضافه می‌شود.',
+                            'برای شروع ضبط روی دکمه بزنید. وقتی گفتار تمام شود، دکمه خودکار به حالت قبل برمی‌گردد و متن به ادامه کادر اضافه می‌شود.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: kMuted, fontSize: 12, height: 1.7),
                           ),
@@ -1917,43 +1914,80 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
+  Future<bool> _ensureSpeechReady() async {
+    if (_speechReady) return true;
+    final available = await _speech.initialize(
+      onError: _handleSpeechError,
+      onStatus: _handleSpeechStatus,
+    );
+    _speechReady = available;
+    return available;
+  }
+
+  void _handleSpeechStatus(String status) {
+    if (status == 'done' || status == 'notListening') {
+      if (mounted) setState(() => _listening = false);
+    }
+  }
+
+  void _handleSpeechError(dynamic error) {
+    if (mounted) setState(() => _listening = false);
+
+    // خطاهای رایج زمانی که کاربر سکوت می‌کند یا موتور گفتار چیزی تشخیص نمی‌دهد،
+    // خطای واقعی محسوب نمی‌شوند و نباید کاربر را اذیت کنند.
+    final msg = error.toString().toLowerCase();
+    final recoverable = msg.contains('no_match') ||
+        msg.contains('nomatch') ||
+        msg.contains('speech_timeout') ||
+        msg.contains('timeout') ||
+        msg.contains('client') ||
+        msg.contains('error_client');
+
+    if (recoverable) return;
+  }
+
   Future<void> _startListening() async {
     if (_listening) return;
-    final available = await _speech.initialize(
-      onError: (e) {
-        if (mounted) {
-          setState(() => _listening = false);
-          _toast('خطای ضبط صدا: ${e.errorMsg}', error: true);
-        }
-      },
-      onStatus: (s) {
-        if (s == 'done' || s == 'notListening') {
-          if (mounted) setState(() => _listening = false);
-        }
-      },
-    );
+
+    final available = await _ensureSpeechReady();
     if (!available) {
       _toast('تبدیل گفتار به متن روی این گوشی فعال نیست. می‌توانید متن را دستی تایپ کنید.', error: true);
       return;
     }
 
     _listenBaseText = _rawText.trim();
-    setState(() => _listening = true);
-    await _speech.listen(
-      localeId: 'fa_IR',
-      listenMode: ListenMode.dictation,
-      onResult: (SpeechRecognitionResult result) {
-        final words = result.recognizedWords.trim();
-        final combined = [_listenBaseText, words].where((e) => e.trim().isNotEmpty).join(' ');
-        if (mounted) setState(() => _rawText = combined);
-      },
-    );
+    if (mounted) setState(() => _listening = true);
+
+    try {
+      await _speech.listen(
+        localeId: 'fa_IR',
+        listenMode: ListenMode.dictation,
+        listenFor: const Duration(minutes: 2),
+        pauseFor: const Duration(seconds: 4),
+        partialResults: true,
+        cancelOnError: false,
+        onResult: (SpeechRecognitionResult result) {
+          final words = result.recognizedWords.trim();
+          if (words.isEmpty) return;
+          final combined = [_listenBaseText, words].where((e) => e.trim().isNotEmpty).join(' ');
+          if (mounted) setState(() => _rawText = combined);
+        },
+      );
+    } catch (e) {
+      if (mounted) setState(() => _listening = false);
+      _toast('ضبط ویس شروع نشد. لطفاً دوباره تلاش کنید.', error: true);
+    }
   }
 
   Future<void> _stopListening() async {
-    if (!_listening) return;
-    await _speech.stop();
     if (mounted) setState(() => _listening = false);
+    try {
+      await _speech.stop();
+    } catch (_) {
+      try {
+        await _speech.cancel();
+      } catch (_) {}
+    }
   }
 
   Future<void> _analyze() async {
