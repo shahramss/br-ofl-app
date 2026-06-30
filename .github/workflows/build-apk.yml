@@ -26,33 +26,86 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Prepare Flutter Android project
+      - name: Recreate Android project with final app identity
         working-directory: mobile_app
         run: |
           flutter --version
-          flutter create --platforms=android --project-name product_specs_app .
+          rm -rf android test
+          flutter create --platforms=android --project-name modiriat_hooshmand --org com.webteama .
           rm -rf test
 
       - name: Install dependencies
         working-directory: mobile_app
         run: flutter pub get
 
-      - name: Add Android permissions and app label
+      - name: Force app name, permissions and launcher icon
         working-directory: mobile_app
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('android/app/src/main/AndroidManifest.xml')
-          text = path.read_text()
-          manifest = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          perms = '''<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />'''
+          import re, shutil
+
+          app_label = 'مدیریت هوشمند'
+          manifest_path = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest_path.read_text(encoding='utf-8')
+
+          # Ensure required permissions exist.
           if 'android.permission.INTERNET' not in text:
-              text = text.replace(manifest, perms)
-          text = text.replace('android:label="product_specs_app"', 'android:label="اپ مشخصات محصول"')
-          path.write_text(text)
+              text = text.replace(
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+                  '    <uses-permission android:name="android.permission.INTERNET" />\n'
+                  '    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n'
+                  '    <uses-permission android:name="android.permission.USE_BIOMETRIC" />\n'
+                  '    <uses-permission android:name="android.permission.USE_FINGERPRINT" />'
+              )
+
+          # Replace any existing Android label, regardless of what Flutter generated.
+          if 'android:label=' in text:
+              text = re.sub(r'android:label="[^"]*"', f'android:label="{app_label}"', text, count=1)
+          else:
+              text = text.replace('<application ', f'<application android:label="{app_label}" ', 1)
+
+          # Make sure launcher icon points to ic_launcher.
+          if 'android:icon=' in text:
+              text = re.sub(r'android:icon="[^"]*"', 'android:icon="@mipmap/ic_launcher"', text, count=1)
+          else:
+              text = text.replace('<application ', '<application android:icon="@mipmap/ic_launcher" ', 1)
+
+          manifest_path.write_text(text, encoding='utf-8')
+
+          # local_auth needs FlutterFragmentActivity on Android.
+          for kt in Path('android/app/src/main/kotlin').rglob('MainActivity.kt'):
+              package_line = kt.read_text(encoding='utf-8').splitlines()[0]
+              kt.write_text(package_line + '\n\nimport io.flutter.embedding.android.FlutterFragmentActivity\n\nclass MainActivity: FlutterFragmentActivity()\n', encoding='utf-8')
+
+          # Remove Flutter adaptive icon XML, otherwise Android may keep the default/generated icon.
+          res = Path('android/app/src/main/res')
+          shutil.rmtree(res / 'mipmap-anydpi-v26', ignore_errors=True)
+
+          # Copy the exact uploaded orange icon into all Android launcher densities.
+          icon_root = Path('assets/app_icon/android')
+          if not icon_root.exists():
+              raise SystemExit('Icon folder not found: assets/app_icon/android')
+
+          copied = 0
+          for density in ['mipmap-mdpi','mipmap-hdpi','mipmap-xhdpi','mipmap-xxhdpi','mipmap-xxxhdpi']:
+              src = icon_root / density / 'ic_launcher.png'
+              if not src.exists():
+                  raise SystemExit(f'Missing icon: {src}')
+              target = res / density
+              target.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(src, target / 'ic_launcher.png')
+              copied += 1
+
+          print(f'Configured app label: {app_label}')
+          print(f'Copied launcher icons: {copied}')
+          print(manifest_path.read_text(encoding='utf-8'))
           PY
+
+      - name: Clean before build
+        working-directory: mobile_app
+        run: flutter clean && flutter pub get
 
       - name: Build Debug APK
         working-directory: mobile_app
@@ -61,6 +114,6 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: product-specs-debug-apk
+          name: modiriat-hooshmand-debug-apk-v111
           path: mobile_app/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
