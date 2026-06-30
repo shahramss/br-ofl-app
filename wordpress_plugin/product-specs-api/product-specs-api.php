@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Product Specs API
  * Description: API امن برای اپلیکیشن ثبت مشخصات فنی محصولات ووکامرس. مشخصات را فقط به‌عنوان ویژگی اختصاصی همان محصول ذخیره می‌کند و هیچ Global Attribute یا pa_ taxonomy نمی‌سازد.
- * Version: 1.1.1
+ * Version: 1.1.2
  * Author: Product Specs
  * Requires PHP: 7.4
  * Requires at least: 5.8
@@ -422,7 +422,9 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
             }
             $seo_description = '';
             if (isset($params['seo_description'])) {
-                $seo_description = $this->limit_words($this->limit_chars(sanitize_text_field((string) $params['seo_description']), 155), 25);
+                // متای سئو را کوتاه نمی‌کنیم تا تمام مشخصات فنی که اپلیکیشن ساخته داخل سایت ذخیره شود.
+                // فقط تگ‌های HTML و فاصله‌های اضافه پاک می‌شوند.
+                $seo_description = trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags((string) $params['seo_description'])));
             }
 
             $attributes = $product->get_attributes();
