@@ -22,8 +22,8 @@ const Color kText = Color(0xFF1F2937);
 const Color kMuted = Color(0xFF6B7280);
 const Color kLine = Color(0xFFE5E7EB);
 const String kAppName = 'مدیریت هوشمند';
-const String kAppVersion = '1.1.0';
-const String kFooterText = 'طراحی شده در وب تیما  طراح شهرام سعیدنیا';
+const String kAppVersion = '1.1.1';
+const String kFooterText = 'طراحی در گروه وب تیما';
 const String kWebTeamaUrl = 'https://webteama.com';
 
 class ProductSpecsApp extends StatelessWidget {
@@ -213,25 +213,8 @@ class AppHeader extends StatelessWidget {
     this.showBack = false,
   });
 
-  Future<void> _confirmLogout(BuildContext context) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('خروج از اکانت'),
-        content: const Text('می‌خواهید از اکانت وردپرس خارج شوید؟ نام کاربری ذخیره می‌ماند، اما برای ورود بعدی رمز عبور ذخیره نمی‌شود.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('لغو')),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: FilledButton.styleFrom(backgroundColor: kOrange),
-            child: const Text('خروج'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true && context.mounted) {
-      await AuthScope.logout(context);
-    }
+  Future<void> _logoutNow(BuildContext context) async {
+    await AuthScope.logout(context);
   }
 
   @override
@@ -252,7 +235,7 @@ class AppHeader extends StatelessWidget {
                 else
                   IconButton(
                     tooltip: 'خروج از اکانت',
-                    onPressed: () => _confirmLogout(context),
+                    onPressed: () => _logoutNow(context),
                     icon: const Icon(Icons.logout_rounded, color: kMuted),
                   ),
                 const Spacer(),
@@ -591,10 +574,13 @@ class ProductItem {
   final String image;
   final String link;
   final bool hasSpecs;
+  final bool inStock;
+  final String stockStatus;
 
-  ProductItem({required this.id, required this.name, required this.sku, required this.price, required this.image, required this.link, required this.hasSpecs});
+  ProductItem({required this.id, required this.name, required this.sku, required this.price, required this.image, required this.link, required this.hasSpecs, required this.inStock, required this.stockStatus});
 
   factory ProductItem.fromJson(Map<String, dynamic> json) {
+    final status = '${json['stock_status'] ?? ''}';
     return ProductItem(
       id: _toInt(json['id']),
       name: '${json['name'] ?? ''}',
@@ -603,6 +589,8 @@ class ProductItem {
       image: '${json['image'] ?? ''}',
       link: '${json['link'] ?? ''}',
       hasSpecs: json['has_specs'] == true,
+      inStock: json['in_stock'] == true || status == 'instock',
+      stockStatus: status,
     );
   }
 }
@@ -731,11 +719,12 @@ class WordPressApi {
     return items.map((e) => CategoryItem.fromJson(Map<String, dynamic>.from(e))).toList();
   }
 
-  Future<List<ProductItem>> products({required int categoryId, String search = '', String sort = 'newest', int page = 1}) async {
+  Future<List<ProductItem>> products({required int categoryId, String search = '', int page = 1}) async {
     final data = await _getJson(_uri('/products', {
       'category_id': '$categoryId',
       'search': search,
-      'sort': sort,
+      'sort': 'available_newest',
+      'fresh': DateTime.now().millisecondsSinceEpoch.toString(),
       'page': '$page',
       'per_page': '30',
     }));
@@ -1187,12 +1176,13 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Wrap(
                 alignment: WrapAlignment.center,
                 children: [
-                  const Text('طراحی شده در ', style: TextStyle(color: kMuted)),
+                  const Text('طراحی در گروه ', style: TextStyle(color: kMuted)),
                   InkWell(onTap: _openWebTeama, child: const Text('وب تیما', style: TextStyle(color: kOrangeDark, fontWeight: FontWeight.w900, decoration: TextDecoration.underline))),
-                  const Text('  طراح شهرام سعیدنیا', style: TextStyle(color: kMuted)),
                 ],
               ),
             ),
+            const SizedBox(height: 4),
+            const Text('شهرام سعیدنیا', textAlign: TextAlign.center, style: TextStyle(color: kMuted, fontWeight: FontWeight.w700, fontSize: 13)),
             const SizedBox(height: 4),
             const Text('نسخه نرم افزار $kAppVersion', textAlign: TextAlign.center, style: TextStyle(color: kMuted, fontSize: 12)),
           ],
@@ -1536,7 +1526,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
   final _settings = SettingsStore();
   final _search = TextEditingController();
   bool _loading = true;
-  String _sort = 'newest';
   String? _error;
   List<ProductItem> _items = [];
 
@@ -1553,7 +1542,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     });
     try {
       final s = await _settings.load();
-      _items = await WordPressApi(s).products(categoryId: widget.category.id, search: _search.text.trim(), sort: _sort);
+      _items = await WordPressApi(s).products(categoryId: widget.category.id, search: _search.text.trim());
     } catch (e) {
       _error = '$e';
     } finally {
@@ -1585,14 +1574,18 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(child: _SortChip(label: 'جدیدترین', value: 'newest', selected: _sort == 'newest', onTap: _changeSort)),
-                      const SizedBox(width: 8),
-                      Expanded(child: _SortChip(label: 'نام', value: 'name', selected: _sort == 'name', onTap: _changeSort)),
-                      const SizedBox(width: 8),
-                      Expanded(child: _SortChip(label: 'قیمت', value: 'price', selected: _sort == 'price', onTap: _changeSort)),
-                    ],
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF7ED),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFFED7AA)),
+                    ),
+                    child: const Text(
+                      'اولویت نمایش: فقط محصولات موجود، از جدیدترین به قدیمی‌ترین. محصولات ناموجود همیشه در انتهای لیست قرار می‌گیرند.',
+                      style: TextStyle(color: kOrangeDark, fontWeight: FontWeight.w800, fontSize: 12.5),
+                    ),
                   ),
                   const SizedBox(height: 16),
                   if (_loading) const Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator()),
@@ -1614,7 +1607,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                 const SizedBox(height: 5),
                                 Text('SKU: ${p.sku.isEmpty ? 'ندارد' : p.sku}', textDirection: TextDirection.ltr, style: const TextStyle(color: kMuted)),
                                 const SizedBox(height: 8),
-                                StatusPill(success: p.hasSpecs, text: p.hasSpecs ? 'دارای مشخصات' : 'بدون مشخصات'),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: [
+                                    StatusPill(success: p.hasSpecs, text: p.hasSpecs ? 'دارای مشخصات' : 'بدون مشخصات'),
+                                    StatusPill(success: p.inStock, text: p.inStock ? 'موجود' : 'ناموجود'),
+                                  ],
+                                ),
                               ])),
                               const Icon(Icons.chevron_left_rounded, color: kMuted),
                             ],
@@ -1630,10 +1630,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
     );
   }
 
-  void _changeSort(String value) {
-    setState(() => _sort = value);
-    _load();
-  }
 }
 
 class _SortChip extends StatelessWidget {

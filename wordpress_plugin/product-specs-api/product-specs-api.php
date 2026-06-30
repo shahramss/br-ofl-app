@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Product Specs API
  * Description: API امن برای اپلیکیشن ثبت مشخصات فنی محصولات ووکامرس. مشخصات را فقط به‌عنوان ویژگی اختصاصی همان محصول ذخیره می‌کند و هیچ Global Attribute یا pa_ taxonomy نمی‌سازد.
- * Version: 1.1.0
+ * Version: 1.1.1
  * Author: Product Specs
  * Requires PHP: 7.4
  * Requires at least: 5.8
@@ -293,19 +293,33 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
         public function products(WP_REST_Request $request) {
             $category_id = absint($request->get_param('category_id'));
             $search = sanitize_text_field((string) $request->get_param('search'));
-            $sort = sanitize_text_field((string) $request->get_param('sort'));
             $page = max(1, absint($request->get_param('page')));
             $per_page = min(50, max(1, absint($request->get_param('per_page'))));
             if (!$per_page) {
                 $per_page = 30;
             }
 
+            // اولویت ثابت اپلیکیشن: محصولات موجود اول، از جدیدترین به قدیمی‌ترین؛ ناموجودها همیشه آخر.
             $args = array(
                 'post_type' => 'product',
                 'post_status' => 'publish',
                 'posts_per_page' => $per_page,
                 'paged' => $page,
                 's' => $search,
+                'cache_results' => false,
+                'update_post_meta_cache' => true,
+                'update_post_term_cache' => true,
+                'meta_query' => array(
+                    'stock_status_clause' => array(
+                        'key' => '_stock_status',
+                        'compare' => 'EXISTS',
+                    ),
+                ),
+                'orderby' => array(
+                    'stock_status_clause' => 'ASC',
+                    'date' => 'DESC',
+                    'ID' => 'DESC',
+                ),
             );
 
             if ($category_id) {
@@ -318,18 +332,6 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
                 );
             }
 
-            if ($sort === 'name') {
-                $args['orderby'] = 'title';
-                $args['order'] = 'ASC';
-            } elseif ($sort === 'price') {
-                $args['meta_key'] = '_price';
-                $args['orderby'] = 'meta_value_num';
-                $args['order'] = 'ASC';
-            } else {
-                $args['orderby'] = 'date';
-                $args['order'] = 'DESC';
-            }
-
             $query = new WP_Query($args);
             $items = array();
             foreach ($query->posts as $post) {
@@ -340,13 +342,16 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
                 $items[] = $this->format_product_summary($product);
             }
 
-            return rest_ensure_response(array(
+            $response = rest_ensure_response(array(
                 'success' => true,
                 'items' => $items,
                 'page' => $page,
                 'total' => (int) $query->found_posts,
                 'total_pages' => (int) $query->max_num_pages,
             ));
+            $response->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+            $response->header('Pragma', 'no-cache');
+            return $response;
         }
 
         public function product_detail(WP_REST_Request $request) {
@@ -513,6 +518,9 @@ POST <?php echo esc_url_raw(rest_url(self::REST_NS . '/products/123/specs')); ?>
                 'image' => $image ? $image : '',
                 'link' => get_permalink($product->get_id()),
                 'has_specs' => !empty($attrs),
+                'in_stock' => (bool) $product->is_in_stock(),
+                'stock_status' => $product->get_stock_status(),
+                'date_created' => $product->get_date_created() ? $product->get_date_created()->date('Y-m-d H:i:s') : '',
                 'updated_by_app' => (bool) get_post_meta($product->get_id(), '_ps_specs_updated', true),
             );
         }
